@@ -16,7 +16,7 @@ namespace ProjectIvy.Hub
                     .AllowAnyMethod()
                     .AllowAnyHeader()
                     .AllowCredentials()
-                    .WithOrigins("http://localhost:8080", "https://mate.anticevic.net");
+                    .SetIsOriginAllowed(host => true);
             }));
         }
         

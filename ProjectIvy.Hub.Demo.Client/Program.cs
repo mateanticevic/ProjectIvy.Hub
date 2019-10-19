@@ -7,22 +7,31 @@ namespace ProjectIvy.Hub.Demo.Client
 {
     public class Program
     {
-        public static async Task Main(string[] args)
+        public static async Task Main()
         {
             var connection = new HubConnectionBuilder().WithUrl("http://do.anticevic.net:5001/TrackingHub").Build();
             connection.On<Tracking>("Receive", message => Console.WriteLine(message.Latitude));
             await connection.StartAsync();
 
-            var t = new Tracking()
+            double lat = 45;
+            double lng = 16;
+
+            while(true)
             {
-                Latitude = 40,
-                Longitude = 20,
-                Timestamp = DateTime.Now
-            };
+                var t = new Tracking()
+                {
+                    Latitude = lat,
+                    Longitude = lng,
+                    Timestamp = DateTime.Now
+                };
 
-            await connection.SendAsync("Send", t);
+                lat = lat - 0.0001;
+                lng = lat - 0.0001;
 
-            Console.ReadLine();
+                await connection.SendAsync("Send", t);
+
+                Console.ReadLine();
+            }
         }
     }
 }
