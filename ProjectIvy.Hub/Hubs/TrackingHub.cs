@@ -1,6 +1,7 @@
 ﻿using Dapper;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using ProjectIvy.Hub.Constants;
 using ProjectIvy.Hub.Models;
 using System;
@@ -10,9 +11,18 @@ namespace ProjectIvy.Hub.Hubs
 {
     public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
     {
+        private readonly ILogger _logger;
+
+        public TrackingHub(ILogger<TrackingHub> logger)
+        {
+            _logger = logger;
+        }
+
         public override async Task OnConnectedAsync()
         {
-            await base.OnConnectedAsync();
+            var httpContext = Context.GetHttpContext();
+            string ipAddress = httpContext.Request.Headers["X-Forwarded-For"].ToString() ?? httpContext.Connection.RemoteIpAddress.MapToIPv4().ToString();
+            _logger.LogInformation("Client connected {IpAddress}", ipAddress);
 
             using (var sqlConnection = new SqlConnection(Environment.GetEnvironmentVariable("CONNECTION_STRING_MAIN")))
             {
@@ -23,12 +33,24 @@ namespace ProjectIvy.Hub.Hubs
                     await Clients.Caller.SendAsync(TrackingEvents.Receive, tracking);
             }
 
+            await base.OnConnectedAsync();
             return;
         }
 
         public async Task Send(Tracking tracking)
         {
+            _logger.LogInformation("Tracking broadcast");
             await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
+        }
+
+        public override Task OnDisconnectedAsync(Exception exception)
+        {
+            _logger.LogInformation("Client disconnected");
+
+            if (exception is not null)
+                _logger.LogError(exception, "Unexpected disconnect");
+
+            return base.OnDisconnectedAsync(exception);
         }
     }
 }

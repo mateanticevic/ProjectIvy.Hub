@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using ProjectIvy.Hub.Hubs;
+using Serilog;
 
 namespace ProjectIvy.Hub
 {
@@ -19,7 +20,7 @@ namespace ProjectIvy.Hub
             }));
         }
         
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app)
         {
             app.UseRouting()
                .UseEndpoints(configure =>
@@ -27,7 +28,8 @@ namespace ProjectIvy.Hub
                     configure.MapHub<TrackingHub>("/TrackingHub");
                 })
                .UseFileServer()
-               .UseCors("CorsPolicy");
+               .UseCors("CorsPolicy")
+               .UseSerilogRequestLogging();
         }
     }
 }
