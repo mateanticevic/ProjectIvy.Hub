@@ -10,7 +10,7 @@ namespace ProjectIvy.Hub.Demo.Client
     {
         public static async Task Main()
         {
-            var connection = new HubConnectionBuilder().WithUrl("http://localhost:60354/TrackingHub").Build();
+            var connection = new HubConnectionBuilder().WithUrl("http://localhost:58295/TrackingHub").Build();
             connection.On<Tracking>(TrackingEvents.Receive, message => Console.WriteLine(message.Latitude));
             await connection.StartAsync();
 

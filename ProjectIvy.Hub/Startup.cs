@@ -12,27 +12,22 @@ namespace ProjectIvy.Hub
             services.AddSignalR();
             services.AddCors(options => options.AddPolicy("CorsPolicy", builder =>
             {
-                builder
-                    .AllowAnyMethod()
-                    .AllowAnyHeader()
-                    .AllowCredentials()
-                    .SetIsOriginAllowed(host => true);
+                builder.AllowAnyMethod()
+                       .AllowAnyHeader()
+                       .AllowCredentials()
+                       .SetIsOriginAllowed(host => true);
             }));
         }
         
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
-            if (env.IsDevelopment())
-            {
-                app.UseDeveloperExceptionPage();
-            }
-
-            app.UseFileServer();
-            app.UseCors("CorsPolicy");
-            app.UseSignalR(routes =>
-            {
-                routes.MapHub<TrackingHub>("/TrackingHub");
-            });
+            app.UseRouting()
+               .UseEndpoints(configure =>
+                {
+                    configure.MapHub<TrackingHub>("/TrackingHub");
+                })
+               .UseFileServer()
+               .UseCors("CorsPolicy");
         }
     }
 }
