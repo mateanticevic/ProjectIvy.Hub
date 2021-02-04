@@ -22,13 +22,13 @@ namespace ProjectIvy.Hub
         
         public void Configure(IApplicationBuilder app)
         {
-            app.UseRouting()
+            app.UseCors("CorsPolicy")
+               .UseRouting()
                .UseEndpoints(configure =>
                 {
                     configure.MapHub<TrackingHub>("/TrackingHub");
                 })
                .UseFileServer()
-               .UseCors("CorsPolicy")
                .UseSerilogRequestLogging();
         }
     }
