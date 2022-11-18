@@ -1,5 +1,6 @@
-﻿using Microsoft.AspNetCore;
+﻿using System;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.Graylog;
@@ -18,17 +19,20 @@ namespace ProjectIvy.Hub
                                                   .WriteTo.Graylog(new GraylogSinkOptions()
                                                   {
                                                       Facility = "project-ivy-hub",
-                                                      HostnameOrAddress = "10.0.1.24",
-                                                      Port = 12201,
+                                                      HostnameOrAddress = Environment.GetEnvironmentVariable("GRAYLOG_HOST"),
+                                                      Port = Convert.ToInt32(Environment.GetEnvironmentVariable("GRAYLOG_PORT")),
                                                       TransportType = TransportType.Tcp
                                                   })
                                                   .CreateLogger();
-            CreateWebHostBuilder(args).Build().Run();
+            CreateHostBuilder(args).Build().Run();
         }
 
-        public static IWebHostBuilder CreateWebHostBuilder(string[] args) =>
-            WebHost.CreateDefaultBuilder(args)
-                .UseStartup<Startup>()
-                .UseSerilog();
+        public static IHostBuilder CreateHostBuilder(string[] args) =>
+            Host.CreateDefaultBuilder(args)
+                .ConfigureWebHostDefaults(webBuilder =>
+                {
+                    webBuilder.UseStartup<Startup>();
+                })
+            .UseSerilog();
     }
 }

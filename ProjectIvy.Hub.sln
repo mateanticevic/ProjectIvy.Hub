@@ -7,6 +7,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectIvy.Hub", "ProjectIv
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectIvy.Hub.Demo.Client", "ProjectIvy.Hub.Demo.Client\ProjectIvy.Hub.Demo.Client.csproj", "{942DA91B-B036-465D-B125-30C628F55733}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{07F86A6D-6F0E-41BD-8BDC-0D015F6D93C1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "build", "build", "{0CDFC422-0A3B-49F6-9E59-BDE0CD5DED78}"
+	ProjectSection(SolutionItems) = preProject
+		Dockerfile = Dockerfile
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,5 +34,9 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E7C0D7B4-E776-4694-9479-57BAFCB94DE6}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{2C852104-C658-4DFA-B7D4-65BCE624AF44} = {07F86A6D-6F0E-41BD-8BDC-0D015F6D93C1}
+		{942DA91B-B036-465D-B125-30C628F55733} = {07F86A6D-6F0E-41BD-8BDC-0D015F6D93C1}
 	EndGlobalSection
 EndGlobal
