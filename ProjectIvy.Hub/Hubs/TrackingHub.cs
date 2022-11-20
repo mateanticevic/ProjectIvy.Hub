@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using Geohash;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
@@ -40,6 +41,8 @@ namespace ProjectIvy.Hub.Hubs
         public async Task Send(Tracking tracking)
         {
             _logger.LogInformation("Tracking broadcast");
+            _ = Task.Run(async () => await SaveTracking(tracking));
+
             await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
         }
 
@@ -51,6 +54,25 @@ namespace ProjectIvy.Hub.Hubs
                 _logger.LogError(exception, "Unexpected disconnect");
 
             return base.OnDisconnectedAsync(exception);
+        }
+
+        private async Task SaveTracking(Tracking tracking)
+        {
+            var geohasher = new Geohasher();
+            using var sqlConnection = new SqlConnection(Environment.GetEnvironmentVariable("CONNECTION_STRING_MAIN"));
+            var param = new
+            {
+                tracking.Accuracy,
+                tracking.Altitude,
+                Geohash = geohasher.Encode((double)tracking.Latitude, (double)tracking.Longitude, 9),
+                tracking.Latitude,
+                tracking.Longitude,
+                tracking.Speed,
+                tracking.Timestamp,
+                tracking.UserId
+            };
+            await sqlConnection.ExecuteAsync(@"INSERT INTO Tracking.Tracking (Accuracy, Altitude, Latitude, Longitude, Timestamp, Speed, UserId, Geohash)
+                                               VALUES (@Accuracy, @Altitude, @Latitude, @Longitude, @Timestamp, @Speed, @UserId, @Geohash)", param);
         }
     }
 }
