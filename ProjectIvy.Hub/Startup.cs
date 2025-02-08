@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using ProjectIvy.Hub.Hubs;
 using Serilog;
@@ -17,7 +16,7 @@ namespace ProjectIvy.Hub
                        .AllowAnyHeader()
                        .AllowCredentials()
                        .SetIsOriginAllowed(host => true);
-            }));
+            })).AddSingleton<TrackingHub>();
         }
         
         public void Configure(IApplicationBuilder app)

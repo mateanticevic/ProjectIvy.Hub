@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/dotnet/aspnet:7.0-bullseye-slim AS base
+FROM mcr.microsoft.com/dotnet/aspnet:9.0.0-bookworm-slim AS base
 WORKDIR /app
 EXPOSE 80
 
-FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 COPY ["ProjectIvy.Hub/ProjectIvy.Hub.csproj", "ProjectIvy.Hub/"]
 RUN dotnet restore "ProjectIvy.Hub/ProjectIvy.Hub.csproj"
