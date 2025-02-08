@@ -16,6 +16,7 @@ namespace ProjectIvy.Hub
                                                   .MinimumLevel.Override(nameof(Microsoft), LogEventLevel.Information)
                                                   .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
                                                   .Enrich.FromLogContext()
+                                                  .WriteTo.Console()
                                                   .WriteTo.Graylog(new GraylogSinkOptions()
                                                   {
                                                       Facility = "project-ivy-hub",
