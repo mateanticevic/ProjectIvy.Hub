@@ -16,7 +16,8 @@ public class Startup
                    .AllowAnyHeader()
                    .AllowCredentials()
                    .SetIsOriginAllowed(host => true);
-        })).AddSingleton<TrackingHub>();
+        })).AddSingleton<TrackingHub>()
+        .AddMemoryCache();
     }
 
     public void Configure(IApplicationBuilder app)
