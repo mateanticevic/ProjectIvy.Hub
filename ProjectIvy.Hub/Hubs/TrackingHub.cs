@@ -89,6 +89,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
             while (_trackingQueue.TryDequeue(out TrackingForProcessing item))
             {
                 await ProcessTracking(item);
+                _logger.LogInformation("Queue count: {Count}", _trackingQueue.Count);
             }
 
             await Task.Delay(1000);
@@ -96,8 +97,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     }
 
-    private async Task ProcessTracking(TrackingForProcessing item)
+    private async Task ProcessTracking(TrackingForProcessing tracking)
     {
-
     }
 }
