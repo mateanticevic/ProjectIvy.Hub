@@ -29,8 +29,8 @@ namespace ProjectIvy.Hub.Demo.Client
                     UserId = 1002
                 };
 
-                lat = lat - 0.0001;
-                lng = lng - 0.0001;
+                lat = lat + 0.100;
+                //lng = lng - 0.0001;
                 spd++;
 
                 await connection.SendAsync("Send", t);

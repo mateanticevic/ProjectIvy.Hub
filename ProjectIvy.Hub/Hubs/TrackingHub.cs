@@ -105,8 +105,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     private async Task ProcessTracking(TrackingForProcessing tracking)
     {
-        if (!await ProcessTrackingForCity(tracking))
-            await ProcessTrackingForCountry(tracking);
+        await ProcessTrackingForCity(tracking);
     }
 
     private async Task<bool> ProcessTrackingForCity(TrackingForProcessing tracking)
@@ -114,7 +113,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         try
         {
             var city = await ResolveCity(tracking.Geohash);
-            if (city?.Id.HasValue == true)
+            if (city?.Id.HasValue == true || city?.CountryId.HasValue == true)
             {
                 using var sqlConnection = GetSqlConnection();
                 await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId WHERE Id = @Id", new { CityId = city.Id, tracking.Id, city.CountryId });
@@ -139,11 +138,13 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
         var superGeohashes = new List<string>
         {
+            geohash.Substring(0, 8),
             geohash.Substring(0, 7),
             geohash.Substring(0, 6),
             geohash.Substring(0, 5),
             geohash.Substring(0, 4),
-            geohash.Substring(0, 3)
+            geohash.Substring(0, 3),
+            geohash.Substring(0, 2),
         };
 
         using var sqlConnection = GetSqlConnection();
@@ -151,7 +152,20 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         var cityGeohash = await sqlConnection.QueryFirstOrDefaultAsync<CityGeohash>("SELECT TOP 1 CityId, Geohash FROM Common.CityGeohash WHERE Geohash IN @Geohashes", new { Geohashes = superGeohashes });
 
         if (cityGeohash == null)
-            return null;
+        {
+            var countryGeohash = await sqlConnection.QueryFirstOrDefaultAsync<CountryGeohash>("SELECT TOP 1 CountryId, Geohash FROM Common.CountryGeohash WHERE Geohash IN @Geohashes", new { Geohashes = superGeohashes });
+
+            if (countryGeohash == null)
+                return null;
+
+            var cacheItem = new City { CountryId = countryGeohash.CountryId };
+
+            _cityCache.TryAdd(countryGeohash.Geohash, cacheItem);
+
+            _logger.LogInformation("Country resolved {CountryId}", cacheItem.CountryId);
+
+            return cacheItem;
+        }
 
         int countryId = await sqlConnection.ExecuteScalarAsync<int>("SELECT CountryId FROM Common.City WHERE Id = @CityId", new { cityGeohash.CityId });
 
@@ -162,10 +176,6 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         _logger.LogInformation("City resolved {CityId}", city.Id);
 
         return city;
-    }
-
-    private async Task ProcessTrackingForCountry(TrackingForProcessing tracking)
-    {
     }
 
     private SqlConnection GetSqlConnection()
