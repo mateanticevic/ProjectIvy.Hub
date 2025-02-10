@@ -2,7 +2,6 @@
 using Geohash;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using ProjectIvy.Hub.Constants;
 using ProjectIvy.Hub.Models;
@@ -18,18 +17,26 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 {
     private readonly ILogger _logger;
 
-    private readonly IMemoryCache _memoryCache;
-
     private readonly ConcurrentDictionary<string, int?> _cityCache = new ConcurrentDictionary<string, int?>();
 
     private readonly ConcurrentDictionary<string, int?> _countryCache = new ConcurrentDictionary<string, int?>();
 
+    private readonly ConcurrentDictionary<(int UserId, string geohash), int?> _locationCache = new ConcurrentDictionary<(int UserId, string geohash), int?>();
+
     private readonly ConcurrentQueue<TrackingForProcessing> _trackingQueue = new ConcurrentQueue<TrackingForProcessing>();
 
-    public TrackingHub(ILogger<TrackingHub> logger, IMemoryCache memoryCache)
+    public TrackingHub(ILogger<TrackingHub> logger)
     {
         _logger = logger;
         Task.Run(ProcessTrackingQueueAsync);
+
+        using var sqlConnection = GetSqlConnection();
+        var locationGeohashes = sqlConnection.Query<(int UserId, int LocationId, string geohash)>("SELECT l.UserId, lg.LocationId, lg.Geohash FROM Tracking.LocationGeohash lg JOIN Tracking.Location l ON lg.LocationId = l.Id");
+
+        foreach (var locationGeohash in locationGeohashes)
+        {
+            _locationCache.TryAdd((locationGeohash.UserId, locationGeohash.geohash), locationGeohash.LocationId);
+        }
     }
 
     public override async Task OnConnectedAsync()
@@ -58,7 +65,12 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
         await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
 
-
+        // using var sqlConnection = GetSqlConnection();
+        // var trackings = sqlConnection.Query<(long Id, string Geohash)>("SELECT TOP 10000 Id, Geohash FROM Tracking.Tracking WHERE Timestamp > '2025-02-09' AND UserId=1 AND (CityId is null OR CountryID is null OR LocationId is null) ORDER BY Timestamp ASC");
+        // foreach (var t in trackings)
+        // {
+        //     _trackingQueue.Enqueue(new TrackingForProcessing { Id = t.Id, Geohash = t.Geohash, UserId = 1 });
+        // }
     }
 
     public override Task OnDisconnectedAsync(Exception exception)
@@ -108,28 +120,21 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     private async Task ProcessTracking(TrackingForProcessing tracking)
     {
-        await ProcessTrackingForCity(tracking);
-    }
-
-    private async Task<bool> ProcessTrackingForCity(TrackingForProcessing tracking)
-    {
         try
         {
             var resolved = await ResolveCity(tracking.Geohash);
-            if (resolved.CountryId.HasValue || resolved.CityId.HasValue)
+            int? locationId = ResolveLocation(tracking.UserId, tracking.Geohash);
+            if (resolved.CountryId.HasValue || resolved.CityId.HasValue || locationId.HasValue)
             {
                 using var sqlConnection = GetSqlConnection();
-                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId WHERE Id = @Id", new { resolved.CityId, tracking.Id, resolved.CountryId });
+                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId WHERE Id = @Id", new { resolved.CityId, tracking.Id, resolved.CountryId, LocationId = locationId });
                 _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
-                return true;
             }
 
-            return false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing tracking for city");
-            return false;
         }
     }
 
@@ -153,6 +158,9 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
         return (resolvedCityId, resolvedCountryId);
     }
+
+    private int? ResolveLocation(int userId, string geohash)
+        => _locationCache.Where(x => x.Key.UserId == userId && geohash.StartsWith(x.Key.geohash)).OrderByDescending(x => x.Key.geohash.Length).FirstOrDefault().Value;
 
     private async Task<int?> SearchCity(string geohash)
     {
