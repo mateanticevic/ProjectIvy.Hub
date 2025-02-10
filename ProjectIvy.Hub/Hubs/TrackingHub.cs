@@ -20,7 +20,9 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     private readonly IMemoryCache _memoryCache;
 
-    private readonly ConcurrentDictionary<string, City> _cityCache = new ConcurrentDictionary<string, City>();
+    private readonly ConcurrentDictionary<string, int?> _cityCache = new ConcurrentDictionary<string, int?>();
+
+    private readonly ConcurrentDictionary<string, int?> _countryCache = new ConcurrentDictionary<string, int?>();
 
     private readonly ConcurrentQueue<TrackingForProcessing> _trackingQueue = new ConcurrentQueue<TrackingForProcessing>();
 
@@ -55,6 +57,8 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         _ = Task.Run(async () => await SaveTracking(tracking));
 
         await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
+
+
     }
 
     public override Task OnDisconnectedAsync(Exception exception)
@@ -96,7 +100,6 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
             while (_trackingQueue.TryDequeue(out TrackingForProcessing item))
             {
                 await ProcessTracking(item);
-                _logger.LogInformation("Queue count: {Count}, Cache size: {CacheSize}", _trackingQueue.Count, _cityCache.Count);
             }
 
             await Task.Delay(1000);
@@ -112,11 +115,12 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
     {
         try
         {
-            var city = await ResolveCity(tracking.Geohash);
-            if (city?.Id.HasValue == true || city?.CountryId.HasValue == true)
+            var resolved = await ResolveCity(tracking.Geohash);
+            if (resolved.CountryId.HasValue || resolved.CityId.HasValue)
             {
                 using var sqlConnection = GetSqlConnection();
-                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId WHERE Id = @Id", new { CityId = city.Id, tracking.Id, city.CountryId });
+                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId WHERE Id = @Id", new { resolved.CityId, tracking.Id, resolved.CountryId });
+                _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
                 return true;
             }
 
@@ -129,13 +133,29 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         }
     }
 
-    private async Task<City> ResolveCity(string geohash)
+    private async Task<(int? CityId, int? CountryId)> ResolveCity(string geohash)
     {
-        var cityFromCache = _cityCache.SingleOrDefault(x => geohash.StartsWith(x.Key));
+        var cityFromCache = _cityCache.Where(x => geohash.StartsWith(x.Key)).OrderByDescending(x => x.Key.Length).FirstOrDefault();
 
-        if (cityFromCache.Value != null)
-            return cityFromCache.Value;
+        bool cityResolvedFromCache = cityFromCache.Key != null;
+        int? resolvedCityId = cityResolvedFromCache ? cityFromCache.Value : null;
 
+        if (!cityResolvedFromCache)
+            resolvedCityId = await SearchCity(geohash);
+
+        var countryFromCache = _countryCache.Where(x => geohash.StartsWith(x.Key)).OrderByDescending(x => x.Key.Length).FirstOrDefault();
+
+        bool countryResolvedFromCache = countryFromCache.Key != null;
+        int? resolvedCountryId = countryResolvedFromCache ? countryFromCache.Value : null;
+
+        if (!countryResolvedFromCache)
+            resolvedCountryId = await SearchCountry(geohash);
+
+        return (resolvedCityId, resolvedCountryId);
+    }
+
+    private async Task<int?> SearchCity(string geohash)
+    {
         var superGeohashes = new List<string>
         {
             geohash.Substring(0, 8),
@@ -153,29 +173,85 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
         if (cityGeohash == null)
         {
-            var countryGeohash = await sqlConnection.QueryFirstOrDefaultAsync<CountryGeohash>("SELECT TOP 1 CountryId, Geohash FROM Common.CountryGeohash WHERE Geohash IN @Geohashes", new { Geohashes = superGeohashes });
+            string largestEmptyParentGeohash = await FindLargestEmptyParentGeohash(geohash);
+            _cityCache.TryAdd(largestEmptyParentGeohash, null);
 
-            if (countryGeohash == null)
-                return null;
+            _logger.LogInformation("City not found, largest empty parent {Geohash}", largestEmptyParentGeohash);
 
-            var cacheItem = new City { CountryId = countryGeohash.CountryId };
-
-            _cityCache.TryAdd(countryGeohash.Geohash, cacheItem);
-
-            _logger.LogInformation("Country resolved {CountryId}", cacheItem.CountryId);
-
-            return cacheItem;
+            return null;
         }
 
-        int countryId = await sqlConnection.ExecuteScalarAsync<int>("SELECT CountryId FROM Common.City WHERE Id = @CityId", new { cityGeohash.CityId });
+        _cityCache.TryAdd(cityGeohash.Geohash, cityGeohash.CityId);
 
-        var city = new City { Id = cityGeohash.CityId, CountryId = countryId };
+        _logger.LogInformation("City {CityId} found", cityGeohash.CityId);
 
-        _cityCache.TryAdd(cityGeohash.Geohash, city);
+        return cityGeohash.CityId;
+    }
 
-        _logger.LogInformation("City resolved {CityId}", city.Id);
+    private async Task<int?> SearchCountry(string geohash)
+    {
+        var superGeohashes = new List<string>
+        {
+            geohash.Substring(0, 8),
+            geohash.Substring(0, 7),
+            geohash.Substring(0, 6),
+            geohash.Substring(0, 5),
+            geohash.Substring(0, 4),
+            geohash.Substring(0, 3),
+            geohash.Substring(0, 2),
+        };
 
-        return city;
+        using var sqlConnection = GetSqlConnection();
+
+        var countryGeohash = await sqlConnection.QueryFirstOrDefaultAsync<CountryGeohash>("SELECT TOP 1 CountryId, Geohash FROM Common.CountryGeohash WHERE Geohash IN @Geohashes", new { Geohashes = superGeohashes });
+
+        if (countryGeohash == null)
+        {
+            string largestEmptyParentGeohash = await FindLargestEmptyParentGeohashForCountries(geohash);
+            _countryCache.TryAdd(largestEmptyParentGeohash, null);
+
+            _logger.LogInformation("Country not found, largest empty parent {Geohash}", largestEmptyParentGeohash);
+
+            return null;
+        }
+
+        _countryCache.TryAdd(countryGeohash.Geohash, countryGeohash.CountryId);
+
+        _logger.LogInformation("Country {CountryId} found", countryGeohash.CountryId);
+
+        return countryGeohash.CountryId;
+    }
+
+    private async Task<string> FindLargestEmptyParentGeohash(string geohash)
+    {
+        using var sqlConnection = GetSqlConnection();
+
+        for (int i = 2; i < geohash.Length; i++)
+        {
+            string searchGeohash = geohash.Substring(0, i);
+            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>("SELECT TOP 1 Geohash FROM Common.CityGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1", new { Geohash = searchGeohash });
+
+            if (match == null)
+                return searchGeohash;
+        }
+
+        return geohash;
+    }
+
+    private async Task<string> FindLargestEmptyParentGeohashForCountries(string geohash)
+    {
+        using var sqlConnection = GetSqlConnection();
+
+        for (int i = 2; i < geohash.Length; i++)
+        {
+            string searchGeohash = geohash.Substring(0, i);
+            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>("SELECT TOP 1 Geohash FROM Common.CountryGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1", new { Geohash = searchGeohash });
+
+            if (match == null)
+                return searchGeohash;
+        }
+
+        return geohash;
     }
 
     private SqlConnection GetSqlConnection()
