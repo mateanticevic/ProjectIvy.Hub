@@ -65,12 +65,12 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
         await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
 
-        // using var sqlConnection = GetSqlConnection();
-        // var trackings = sqlConnection.Query<(long Id, string Geohash)>("SELECT TOP 10000 Id, Geohash FROM Tracking.Tracking WHERE Timestamp > '2025-02-09' AND UserId=1 AND (CityId is null OR CountryID is null OR LocationId is null) ORDER BY Timestamp ASC");
-        // foreach (var t in trackings)
-        // {
-        //     _trackingQueue.Enqueue(new TrackingForProcessing { Id = t.Id, Geohash = t.Geohash, UserId = 1 });
-        // }
+        using var sqlConnection = GetSqlConnection();
+        var trackings = sqlConnection.Query<(long Id, string Geohash)>("SELECT TOP 10000 Id, Geohash FROM Tracking.Tracking WHERE Timestamp > '2025-01-20' AND UserId=1 AND (CityId is null OR CountryID is null OR LocationId is null) ORDER BY Timestamp ASC");
+        foreach (var t in trackings)
+        {
+            _trackingQueue.Enqueue(new TrackingForProcessing { Id = t.Id, Geohash = t.Geohash, UserId = 1 });
+        }
     }
 
     public override Task OnDisconnectedAsync(Exception exception)
@@ -122,12 +122,13 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
     {
         try
         {
-            var resolved = await ResolveCity(tracking.Geohash);
+            int? cityId = await ResolveCity(tracking.Geohash);
+            int? countryId = await ResolveCountry(tracking.Geohash);
             int? locationId = ResolveLocation(tracking.UserId, tracking.Geohash);
-            if (resolved.CountryId.HasValue || resolved.CityId.HasValue || locationId.HasValue)
+            if (countryId.HasValue || cityId.HasValue || locationId.HasValue)
             {
                 using var sqlConnection = GetSqlConnection();
-                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId WHERE Id = @Id", new { resolved.CityId, tracking.Id, resolved.CountryId, LocationId = locationId });
+                await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId WHERE Id = @Id", new { cityId, tracking.Id, countryId, LocationId = locationId });
                 _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
             }
 
@@ -138,7 +139,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         }
     }
 
-    private async Task<(int? CityId, int? CountryId)> ResolveCity(string geohash)
+    private async Task<int?> ResolveCity(string geohash)
     {
         var cityFromCache = _cityCache.Where(x => geohash.StartsWith(x.Key)).OrderByDescending(x => x.Key.Length).FirstOrDefault();
 
@@ -148,6 +149,11 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         if (!cityResolvedFromCache)
             resolvedCityId = await SearchCity(geohash);
 
+        return resolvedCityId;
+    }
+
+    private async Task<int?> ResolveCountry(string geohash)
+    {
         var countryFromCache = _countryCache.Where(x => geohash.StartsWith(x.Key)).OrderByDescending(x => x.Key.Length).FirstOrDefault();
 
         bool countryResolvedFromCache = countryFromCache.Key != null;
@@ -156,7 +162,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         if (!countryResolvedFromCache)
             resolvedCountryId = await SearchCountry(geohash);
 
-        return (resolvedCityId, resolvedCountryId);
+        return resolvedCountryId;
     }
 
     private int? ResolveLocation(int userId, string geohash)
