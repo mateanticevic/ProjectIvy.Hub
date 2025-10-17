@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using ProjectIvy.Hub.Enrichers;
 using ProjectIvy.Hub.Hubs;
 using Serilog;
 
@@ -9,6 +11,7 @@ public class Startup
 {
     public void ConfigureServices(IServiceCollection services)
     {
+        services.AddHttpContextAccessor();
         services.AddSignalR();
         services.AddCors(options => options.AddPolicy("CorsPolicy", builder =>
         {
