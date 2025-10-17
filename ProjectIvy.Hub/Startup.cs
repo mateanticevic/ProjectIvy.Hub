@@ -29,6 +29,15 @@ public class Startup
                 configure.MapHub<TrackingHub>("/TrackingHub");
             })
            .UseFileServer()
-           .UseSerilogRequestLogging();
+           .UseSerilogRequestLogging(configure =>
+            {
+                configure.EnrichDiagnosticContext = (context, httpContext) =>
+                {
+                    foreach (var header in httpContext.Request.Headers)
+                    {
+                        context.Set($"header_{header.Key.Replace("-", "")}", header.Value.ToString());
+                    }
+                };
+            });
     }
 }
