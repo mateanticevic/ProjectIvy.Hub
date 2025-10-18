@@ -1,15 +1,15 @@
-﻿using Dapper;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Dapper;
 using Geohash;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using ProjectIvy.Hub.Constants;
 using ProjectIvy.Hub.Models;
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ProjectIvy.Hub.Hubs;
 
@@ -64,13 +64,6 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         _ = Task.Run(async () => await SaveTracking(tracking));
 
         await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
-
-        using var sqlConnection = GetSqlConnection();
-        var trackings = sqlConnection.Query<(long Id, string Geohash)>("SELECT TOP 10000 Id, Geohash FROM Tracking.Tracking WHERE Timestamp > '2025-01-20' AND UserId=1 AND (CityId is null OR CountryID is null OR LocationId is null) ORDER BY Timestamp ASC");
-        foreach (var t in trackings)
-        {
-            _trackingQueue.Enqueue(new TrackingForProcessing { Id = t.Id, Geohash = t.Geohash, UserId = 1 });
-        }
     }
 
     public override Task OnDisconnectedAsync(Exception exception)
