@@ -15,7 +15,7 @@ namespace ProjectIvy.Hub.Services;
 public class TrackingProcessingService : BackgroundService
 {
     private readonly ILogger<TrackingProcessingService> _logger;
-    
+
     private readonly ConcurrentDictionary<string, int?> _cityCache = new ConcurrentDictionary<string, int?>();
     private readonly ConcurrentDictionary<string, int?> _countryCache = new ConcurrentDictionary<string, int?>();
     private readonly ConcurrentDictionary<(int UserId, string geohash), int?> _locationCache = new ConcurrentDictionary<(int UserId, string geohash), int?>();
@@ -24,17 +24,21 @@ public class TrackingProcessingService : BackgroundService
     public ConcurrentDictionary<string, int?> CityCache => _cityCache;
     public ConcurrentDictionary<string, int?> CountryCache => _countryCache;
     public ConcurrentDictionary<(int UserId, string geohash), int?> LocationCache => _locationCache;
-    
+
     public TrackingProcessingService(ILogger<TrackingProcessingService> logger)
     {
         _logger = logger;
     }
 
+    public void EnqueueTracking(TrackingForProcessing tracking)
+    {
+        _trackingQueue.Enqueue(tracking);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("TrackingProcessingService starting - Loading caches...");
-        
-        // Load location geohashes cache
+
         using (var sqlConnection = GetSqlConnection())
         {
             var locationGeohashes = await sqlConnection.QueryAsync<(int UserId, int LocationId, string geohash)>(
@@ -44,13 +48,12 @@ public class TrackingProcessingService : BackgroundService
             {
                 _locationCache.TryAdd((locationGeohash.UserId, locationGeohash.geohash), locationGeohash.LocationId);
             }
-            
+
             _logger.LogInformation("Loaded {Count} location geohashes", _locationCache.Count);
         }
 
         _logger.LogInformation("TrackingProcessingService initialized - Starting background processing");
 
-        // Process queue
         while (!stoppingToken.IsCancellationRequested)
         {
             while (_trackingQueue.TryDequeue(out TrackingForProcessing item))
@@ -62,10 +65,44 @@ public class TrackingProcessingService : BackgroundService
         }
     }
 
-    public void EnqueueTracking(TrackingForProcessing tracking)
+    private async Task<string> FindLargestEmptyParentGeohash(string geohash)
     {
-        _trackingQueue.Enqueue(tracking);
+        using var sqlConnection = GetSqlConnection();
+
+        for (int i = 2; i < geohash.Length; i++)
+        {
+            string searchGeohash = geohash.Substring(0, i);
+            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>(
+                "SELECT TOP 1 Geohash FROM Common.CityGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1",
+                new { Geohash = searchGeohash });
+
+            if (match == null)
+                return searchGeohash;
+        }
+
+        return geohash;
     }
+
+    private async Task<string> FindLargestEmptyParentGeohashForCountries(string geohash)
+    {
+        using var sqlConnection = GetSqlConnection();
+
+        for (int i = 2; i < geohash.Length; i++)
+        {
+            string searchGeohash = geohash.Substring(0, i);
+            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>(
+                "SELECT TOP 1 Geohash FROM Common.CountryGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1",
+                new { Geohash = searchGeohash });
+
+            if (match == null)
+                return searchGeohash;
+        }
+
+        return geohash;
+    }
+
+    private SqlConnection GetSqlConnection()
+        => new SqlConnection(Environment.GetEnvironmentVariable("CONNECTION_STRING_MAIN"));
 
     private async Task ProcessTracking(TrackingForProcessing tracking)
     {
@@ -74,14 +111,14 @@ public class TrackingProcessingService : BackgroundService
             int? cityId = await ResolveCity(tracking.Geohash);
             int? countryId = await ResolveCountry(tracking.Geohash);
             int? locationId = ResolveLocation(tracking.UserId, tracking.Geohash);
-            
+
             if (countryId.HasValue || cityId.HasValue || locationId.HasValue)
             {
                 using var sqlConnection = GetSqlConnection();
                 await sqlConnection.ExecuteAsync(
-                    "UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId WHERE Id = @Id",
-                    new { cityId, tracking.Id, countryId, LocationId = locationId });
-                
+                    "UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId, Processed = @Processed WHERE Id = @Id",
+                    new { cityId, tracking.Id, countryId, LocationId = locationId, Processed = DateTime.UtcNow });
+
                 _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
             }
         }
@@ -89,6 +126,66 @@ public class TrackingProcessingService : BackgroundService
         {
             _logger.LogError(ex, "Error processing tracking");
         }
+    }
+
+    private async Task ProcessCity(int cityId)
+    {
+        _logger.LogInformation("Processing city {CityId}", cityId);
+
+        using var sqlConnection = GetSqlConnection();
+        var cityGeohashes = await sqlConnection.QueryAsync<(int CityId, string geohash)>(
+            "SELECT CityId, Geohash FROM Common.CityGeohash WHERE CityId = @CityId",
+            new { CityId = cityId });
+
+        foreach (var cityGeohash in cityGeohashes)
+        {
+            int updatedRows = await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CityId = @CityId, Processed = @Processed WHERE CHARINDEX(@Geohash, Geohash) = 1 AND CityId IS NULL",
+                new { cityGeohash.CityId, cityGeohash.geohash, Processed = DateTime.UtcNow });
+
+            _logger.LogInformation("Updated {UpdatedRows} tracking records for city {CityId}", updatedRows, cityGeohash.CityId);
+        }
+
+        _logger.LogInformation("Finished processing city {CityId}", cityId);
+    }
+
+    private async Task ProcessCountry(int countryId)
+    {
+        _logger.LogInformation("Processing country {CountryId}", countryId);
+
+        using var sqlConnection = GetSqlConnection();
+        var countryGeohashes = await sqlConnection.QueryAsync<(int CountryId, string geohash)>(
+            "SELECT CountryId, Geohash FROM Common.CountryGeohash WHERE CountryId = @CountryId",
+            new { CountryId = countryId });
+
+        foreach (var countryGeohash in countryGeohashes)
+        {
+            int updatedRows = await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET CountryId = @CountryId, Processed = @Processed WHERE CHARINDEX(@Geohash, Geohash) = 1 AND CountryId IS NULL",
+                new { countryGeohash.CountryId, countryGeohash.geohash, Processed = DateTime.UtcNow });
+
+            _logger.LogInformation("Updated {UpdatedRows} tracking records for country {CountryId}", updatedRows, countryGeohash.CountryId);
+        }
+
+        _logger.LogInformation("Finished processing country {CountryId}", countryId);
+    }
+
+    private async Task ProcessLocation(int locationId)
+    {
+        _logger.LogInformation("Processing location {LocationId}", locationId);
+
+        using var sqlConnection = GetSqlConnection();
+        var locationGeohashes = await sqlConnection.QueryAsync<(int UserId, int LocationId, string geohash)>(
+            "SELECT l.UserId, lg.LocationId, lg.Geohash FROM Tracking.LocationGeohash lg JOIN Tracking.Location l ON lg.LocationId = l.Id WHERE lg.LocationId = @LocationId",
+            new { LocationId = locationId });
+
+        foreach (var locationGeohash in locationGeohashes)
+        {
+            int updatedRows = await sqlConnection.ExecuteAsync("UPDATE Tracking.Tracking SET LocationId = @LocationId, Processed = @Processed WHERE CHARINDEX(@Geohash, Geohash) = 1 AND UserId = @UserId AND Processed IS NULL",
+                new { locationGeohash.LocationId, locationGeohash.geohash, locationGeohash.UserId, Processed = DateTime.UtcNow });
+
+            _logger.LogInformation("Updated {UpdatedRows} tracking records for location {LocationId}", updatedRows, locationGeohash.LocationId);
+        }
+
+        _logger.LogInformation("Finished processing location {LocationId}", locationId);
     }
 
     private async Task<int?> ResolveCity(string geohash)
@@ -185,43 +282,4 @@ public class TrackingProcessingService : BackgroundService
 
         return countryGeohash.CountryId;
     }
-
-    private async Task<string> FindLargestEmptyParentGeohash(string geohash)
-    {
-        using var sqlConnection = GetSqlConnection();
-
-        for (int i = 2; i < geohash.Length; i++)
-        {
-            string searchGeohash = geohash.Substring(0, i);
-            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>(
-                "SELECT TOP 1 Geohash FROM Common.CityGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1",
-                new { Geohash = searchGeohash });
-
-            if (match == null)
-                return searchGeohash;
-        }
-
-        return geohash;
-    }
-
-    private async Task<string> FindLargestEmptyParentGeohashForCountries(string geohash)
-    {
-        using var sqlConnection = GetSqlConnection();
-
-        for (int i = 2; i < geohash.Length; i++)
-        {
-            string searchGeohash = geohash.Substring(0, i);
-            string match = await sqlConnection.QueryFirstOrDefaultAsync<string>(
-                "SELECT TOP 1 Geohash FROM Common.CountryGeohash WHERE CHARINDEX(@Geohash, Geohash) = 1",
-                new { Geohash = searchGeohash });
-
-            if (match == null)
-                return searchGeohash;
-        }
-
-        return geohash;
-    }
-
-    private SqlConnection GetSqlConnection()
-        => new SqlConnection(Environment.GetEnvironmentVariable("CONNECTION_STRING_MAIN"));
 }
