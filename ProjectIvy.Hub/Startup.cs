@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using ProjectIvy.Hub.Enrichers;
 using ProjectIvy.Hub.Hubs;
+using ProjectIvy.Hub.Services;
 using Serilog;
 
 namespace ProjectIvy.Hub;
@@ -19,7 +20,9 @@ public class Startup
                    .AllowAnyHeader()
                    .AllowCredentials()
                    .SetIsOriginAllowed(host => true);
-        })).AddSingleton<TrackingHub>()
+        }))
+        .AddSingleton<TrackingProcessingService>()
+        .AddHostedService(provider => provider.GetRequiredService<TrackingProcessingService>())
         .AddMemoryCache();
     }
 
