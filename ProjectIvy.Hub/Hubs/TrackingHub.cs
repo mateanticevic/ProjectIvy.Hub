@@ -2,8 +2,10 @@
 using System.Threading.Tasks;
 using Dapper;
 using Geohash;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using ProjectIvy.Hub.Constants;
 using ProjectIvy.Hub.Models;
@@ -15,11 +17,13 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 {
     private readonly ILogger _logger;
     private readonly TrackingProcessingService _processingService;
+    private readonly IMemoryCache _memoryCache;
 
-    public TrackingHub(ILogger<TrackingHub> logger, TrackingProcessingService processingService)
+    public TrackingHub(ILogger<TrackingHub> logger, TrackingProcessingService processingService, IMemoryCache memoryCache)
     {
         _logger = logger;
         _processingService = processingService;
+        _memoryCache = memoryCache;
     }
 
     public override async Task OnConnectedAsync()
@@ -41,6 +45,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         return;
     }
 
+    [Authorize]
     public async Task Send(Tracking tracking)
     {
         _logger.LogInformation("Tracking broadcast");
@@ -61,8 +66,19 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     private async Task SaveTracking(Tracking tracking)
     {
-        var geohasher = new Geohasher();
+        var username = Context.User?.FindFirst("preferred_username")?.Value;
+        
         using var sqlConnection = GetSqlConnection();
+        await sqlConnection.OpenAsync();
+        
+        var cacheKey = $"userId_{username}";
+        var userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+            return await sqlConnection.QuerySingleOrDefaultAsync<int?>("SELECT Id FROM [User].[User] WHERE Username = @Username", new { Username = username });
+        });
+        
+        var geohasher = new Geohasher();
         var param = new
         {
             tracking.Accuracy,
@@ -72,13 +88,13 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
             tracking.Longitude,
             tracking.Speed,
             tracking.Timestamp,
-            tracking.UserId
+            UserId = userId
         };
         long id = await sqlConnection.QuerySingleAsync<long>(@"INSERT INTO Tracking.Tracking (Accuracy, Altitude, Latitude, Longitude, Timestamp, Speed, UserId, Geohash)
                                                             OUTPUT INSERTED.Id
                                                             VALUES (@Accuracy, @Altitude, @Latitude, @Longitude, @Timestamp, @Speed, @UserId, @Geohash)", param);
 
-        _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, UserId = param.UserId });
+        _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, UserId = userId.GetValueOrDefault() });
     }
 
     private SqlConnection GetSqlConnection()
