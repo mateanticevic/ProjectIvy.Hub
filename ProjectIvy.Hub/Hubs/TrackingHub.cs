@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Dapper;
 using Geohash;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
@@ -49,7 +50,25 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
     public async Task Send(Tracking tracking)
     {
         _logger.LogInformation("Tracking broadcast");
-        _ = Task.Run(async () => await SaveTracking(tracking));
+        
+        // Extract user claims and resolve userId before starting background task to avoid disposed context
+        var username = Context.User?.FindFirst("preferred_username")?.Value;
+        
+        int? userId = null;
+        if (!string.IsNullOrEmpty(username))
+        {
+            using var sqlConnection = GetSqlConnection();
+            await sqlConnection.OpenAsync();
+            
+            var cacheKey = $"userId_{username}";
+            userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+                return await sqlConnection.QuerySingleOrDefaultAsync<int?>("SELECT Id FROM [User].[User] WHERE Username = @Username", new { Username = username });
+            });
+        }
+        
+        _ = Task.Run(async () => await SaveTracking(tracking, userId));
 
         await Clients.All.SendAsync(TrackingEvents.Receive, tracking);
     }
@@ -64,21 +83,12 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
         return base.OnDisconnectedAsync(exception);
     }
 
-    private async Task SaveTracking(Tracking tracking)
+    private async Task SaveTracking(Tracking tracking, int? userId)
     {
         try
         {
-            var username = Context.User?.FindFirst("preferred_username")?.Value;
-
             using var sqlConnection = GetSqlConnection();
             await sqlConnection.OpenAsync();
-
-            var cacheKey = $"userId_{username}";
-            var userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
-            {
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
-                return await sqlConnection.QuerySingleOrDefaultAsync<int?>("SELECT Id FROM [User].[User] WHERE Username = @Username", new { Username = username });
-            });
 
             var geohasher = new Geohasher();
             var param = new
