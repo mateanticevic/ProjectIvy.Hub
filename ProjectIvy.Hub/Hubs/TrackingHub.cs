@@ -66,35 +66,43 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
 
     private async Task SaveTracking(Tracking tracking)
     {
-        var username = Context.User?.FindFirst("preferred_username")?.Value;
-        
-        using var sqlConnection = GetSqlConnection();
-        await sqlConnection.OpenAsync();
-        
-        var cacheKey = $"userId_{username}";
-        var userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+        try
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
-            return await sqlConnection.QuerySingleOrDefaultAsync<int?>("SELECT Id FROM [User].[User] WHERE Username = @Username", new { Username = username });
-        });
-        
-        var geohasher = new Geohasher();
-        var param = new
-        {
-            tracking.Accuracy,
-            tracking.Altitude,
-            Geohash = geohasher.Encode((double)tracking.Latitude, (double)tracking.Longitude, 9),
-            tracking.Latitude,
-            tracking.Longitude,
-            tracking.Speed,
-            tracking.Timestamp,
-            UserId = userId
-        };
-        long id = await sqlConnection.QuerySingleAsync<long>(@"INSERT INTO Tracking.Tracking (Accuracy, Altitude, Latitude, Longitude, Timestamp, Speed, UserId, Geohash)
+            var username = Context.User?.FindFirst("preferred_username")?.Value;
+
+            using var sqlConnection = GetSqlConnection();
+            await sqlConnection.OpenAsync();
+
+            var cacheKey = $"userId_{username}";
+            var userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
+                return await sqlConnection.QuerySingleOrDefaultAsync<int?>("SELECT Id FROM [User].[User] WHERE Username = @Username", new { Username = username });
+            });
+
+            var geohasher = new Geohasher();
+            var param = new
+            {
+                tracking.Accuracy,
+                tracking.Altitude,
+                Geohash = geohasher.Encode((double)tracking.Latitude, (double)tracking.Longitude, 9),
+                tracking.Latitude,
+                tracking.Longitude,
+                tracking.Speed,
+                tracking.Timestamp,
+                UserId = userId
+            };
+            long id = await sqlConnection.QuerySingleAsync<long>(@"INSERT INTO Tracking.Tracking (Accuracy, Altitude, Latitude, Longitude, Timestamp, Speed, UserId, Geohash)
                                                             OUTPUT INSERTED.Id
                                                             VALUES (@Accuracy, @Altitude, @Latitude, @Longitude, @Timestamp, @Speed, @UserId, @Geohash)", param);
 
-        _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, UserId = userId.GetValueOrDefault() });
+            _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, UserId = userId.GetValueOrDefault() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving tracking data");
+            return;
+        }
     }
 
     private SqlConnection GetSqlConnection()
