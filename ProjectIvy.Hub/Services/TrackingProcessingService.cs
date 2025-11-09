@@ -20,10 +20,12 @@ public class TrackingProcessingService : BackgroundService
     private readonly ConcurrentDictionary<string, int?> _countryCache = new ConcurrentDictionary<string, int?>();
     private readonly ConcurrentDictionary<(int UserId, string geohash), int?> _locationCache = new ConcurrentDictionary<(int UserId, string geohash), int?>();
     private readonly ConcurrentQueue<TrackingForProcessing> _trackingQueue = new ConcurrentQueue<TrackingForProcessing>();
+    private readonly ConcurrentDictionary<int, (int? LocationId, DateTime Timestamp)> _currentUserLocations = new ConcurrentDictionary<int, (int? LocationId, DateTime Timestamp)>();
 
     public ConcurrentDictionary<string, int?> CityCache => _cityCache;
     public ConcurrentDictionary<string, int?> CountryCache => _countryCache;
     public ConcurrentDictionary<(int UserId, string geohash), int?> LocationCache => _locationCache;
+    public ConcurrentDictionary<int, (int? LocationId, DateTime Timestamp)> CurrentUserLocations => _currentUserLocations;
 
     public TrackingProcessingService(ILogger<TrackingProcessingService> logger)
     {
@@ -121,6 +123,23 @@ public class TrackingProcessingService : BackgroundService
 
                 _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
             }
+
+            if (!_currentUserLocations.ContainsKey(tracking.UserId))
+                _currentUserLocations.TryAdd(tracking.UserId, (null, tracking.Timestamp));
+
+            var existingLocation = _currentUserLocations[tracking.UserId];
+
+            if (tracking.Timestamp < existingLocation.Timestamp
+                || (!locationId.HasValue && !existingLocation.LocationId.HasValue)
+                || locationId == existingLocation.LocationId)
+                return;
+
+            _currentUserLocations.TryUpdate(tracking.UserId, (locationId, tracking.Timestamp), existingLocation);
+
+            if (locationId.HasValue)
+                _logger.LogInformation("User {UserId} entered location {LocationId}", tracking.UserId, locationId.Value);
+            else
+                _logger.LogInformation("User {UserId} exited location {LocationId}", tracking.UserId, existingLocation.LocationId);
         }
         catch (Exception ex)
         {

@@ -23,8 +23,8 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
     public TrackingHub(ILogger<TrackingHub> logger, TrackingProcessingService processingService, IMemoryCache memoryCache)
     {
         _logger = logger;
-        _processingService = processingService;
         _memoryCache = memoryCache;
+        _processingService = processingService;
     }
 
     public override async Task OnConnectedAsync()
@@ -106,7 +106,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
                                                             OUTPUT INSERTED.Id
                                                             VALUES (@Accuracy, @Altitude, @Latitude, @Longitude, @Timestamp, @Speed, @UserId, @Geohash)", param);
 
-            _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, UserId = userId.GetValueOrDefault() });
+            _processingService.EnqueueTracking(new TrackingForProcessing { Id = id, Geohash = param.Geohash, Timestamp = param.Timestamp, UserId = userId.GetValueOrDefault() });
         }
         catch (Exception ex)
         {
