@@ -105,6 +105,7 @@ public class Startup
         app.UseAuthorization();
         app.UseEndpoints(configure =>
         {
+            configure.MapHub<JobHub>("/JobHub");
             configure.MapHub<TrackingHub>("/TrackingHub");
         });
         app.UseFileServer();

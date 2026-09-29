@@ -114,15 +114,20 @@ public class TrackingProcessingService : BackgroundService
             int? countryId = await ResolveCountry(tracking.Geohash);
             int? locationId = ResolveLocation(tracking.UserId, tracking.Geohash);
 
+            using var sqlConnection = GetSqlConnection();
             if (countryId.HasValue || cityId.HasValue || locationId.HasValue)
             {
-                using var sqlConnection = GetSqlConnection();
                 await sqlConnection.ExecuteAsync(
                     "UPDATE Tracking.Tracking SET CityId = @CityId, CountryId = @CountryId, LocationId = @LocationId, Processed = @Processed WHERE Id = @Id",
                     new { cityId, tracking.Id, countryId, LocationId = locationId, Processed = DateTime.UtcNow });
-
-                _logger.LogInformation("Tracking {Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
             }
+            else
+            {
+                await sqlConnection.ExecuteAsync(
+                    "UPDATE Tracking.Tracking SET Processed = @Processed WHERE Id = @Id",
+                    new { tracking.Id, Processed = DateTime.UtcNow });
+            }
+            _logger.LogInformation("Tracking #{Id} resolved, queue count: {Count}", tracking.Id, _trackingQueue.Count);
 
             if (!_currentUserLocations.ContainsKey(tracking.UserId))
                 _currentUserLocations.TryAdd(tracking.UserId, (null, tracking.Timestamp));
