@@ -98,7 +98,16 @@ public static class Program
     private static async Task<HubConnection> Connect(string url, string token)
     {
         var connection = BuildConnection(url, token);
-        if (url.EndsWith("/TrackingHub", StringComparison.OrdinalIgnoreCase))
+        if (url.EndsWith("/JobHub", StringComparison.OrdinalIgnoreCase))
+        {
+            connection.On<int>(JobEvents.ProcessDayProgress, progress =>
+            {
+                Console.WriteLine();
+                Console.WriteLine($"[JobHub.{JobEvents.ProcessDayProgress}] {progress}");
+                Console.Write("> ");
+            });
+        }
+        else if (url.EndsWith("/TrackingHub", StringComparison.OrdinalIgnoreCase))
         {
             connection.On<Tracking>(TrackingEvents.Receive, tracking =>
             {
