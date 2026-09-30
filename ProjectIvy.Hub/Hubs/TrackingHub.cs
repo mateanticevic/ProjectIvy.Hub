@@ -60,7 +60,7 @@ public class TrackingHub : Microsoft.AspNetCore.SignalR.Hub
             using var sqlConnection = GetSqlConnection();
             await sqlConnection.OpenAsync();
             
-            var cacheKey = $"userId_{username}";
+            string cacheKey = $"userId_{username}";
             userId = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
             {
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);

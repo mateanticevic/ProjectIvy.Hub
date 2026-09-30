@@ -146,9 +146,9 @@ Enable detailed logging by setting the log level to Debug:
 ## Package Dependencies
 
 The implementation uses the following NuGet packages:
-- `Keycloak.AuthServices.Authentication` (v2.5.3)
-- `Keycloak.AuthServices.Authorization` (v2.5.3)
-- `Microsoft.AspNetCore.Authentication.JwtBearer` (v9.0.0)
+- `Keycloak.AuthServices.Authentication` (v3.0.0)
+- `Keycloak.AuthServices.Authorization` (v3.0.0)
+- `Microsoft.AspNetCore.Authentication.JwtBearer` (v10.0.12)
 - `Microsoft.IdentityModel.Logging` (v8.2.0)
 
 ## Additional Resources
